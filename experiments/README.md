@@ -30,6 +30,71 @@ tensorboard --logdir runs/phase1_pixel:PDE,runs/phase2_transformer:Transformer,r
 
 ---
 
+## Recommended training command (v2, FluidWorld-Delta)
+
+```bash
+python experiments/training/pixel_prediction/train_pixel.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000 --no-fatigue --var-weight 0.1 --var-target 0.3
+```
+
+Key flags:
+- `--no-fatigue`: disables SynapticFatigue (causes feature collapse, Dead_Dims -> 30K)
+- `--var-weight 0.1 --var-target 0.3`: forces feature variance to stay healthy
+- `--no-deltanet`: disables DeltaNet temporal correction (ablation)
+- `--no-titans`: disables Titans persistent memory (ablation)
+- `--deep-supervision` (optional): applies loss at intermediate encoder layers
+
+## Ablation variants
+
+PDE only (no DeltaNet, no Titans):
+
+```bash
+python experiments/training/pixel_prediction/train_pixel.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000 --no-fatigue --var-weight 0.1 --var-target 0.3 --no-deltanet --no-titans
+```
+
+PDE + DeltaNet only (no Titans):
+
+```bash
+python experiments/training/pixel_prediction/train_pixel.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000 --no-fatigue --var-weight 0.1 --var-target 0.3 --no-titans
+```
+
+PDE + Titans only (no DeltaNet):
+
+```bash
+python experiments/training/pixel_prediction/train_pixel.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000 --no-fatigue --var-weight 0.1 --var-target 0.3 --no-deltanet
+```
+
+Transformer baseline:
+
+```bash
+python experiments/training/baseline_comparison/train_transformer.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000
+```
+
+ConvLSTM baseline:
+
+```bash
+python experiments/training/baseline_comparison/train_convlstm.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000
+```
+
+## Resume from checkpoint
+
+```bash
+python experiments/training/pixel_prediction/train_pixel.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000 --no-fatigue --var-weight 0.1 --var-target 0.3 --resume checkpoints/phase1_pixel/model_step_8000.pt
+```
+
+## PCA feature visualization
+
+Visualize encoder dense features (V-JEPA-style PCA projection to RGB):
+
+```bash
+python tools/visualize_pca_features.py --checkpoint checkpoints/phase1_pixel/model_step_8000.pt --data-dir data/ucf101_64 --n-samples 16
+```
+
+Output: `paper/figures/pca/pca_grid.png`
+
+Compare features across training stages by pointing to different checkpoints.
+
+---
+
 ## Training Pipeline
 
 Sequential experiments forming the core development pipeline.
@@ -38,7 +103,7 @@ Each step builds on the previous one.
 | # | Directory | Status | Description |
 |---|-----------|--------|-------------|
 | 1 | [training/proprioception](training/proprioception/) | Planned | MLP baseline on proprioceptive state prediction |
-| 2 | [training/pixel_prediction](training/pixel_prediction/) | Done | PDE world model trained on UCF-101 (64x64) |
+| 2 | [training/pixel_prediction](training/pixel_prediction/) | Done | PDE + DeltaNet + Titans on UCF-101 (64x64) |
 | 3 | [training/baseline_comparison](training/baseline_comparison/) | Done | Transformer + ConvLSTM at same param budget (~800K) |
 | 4 | [training/representation_probing](training/representation_probing/) | Planned | Linear probe on frozen encoder features |
 | 5 | [training/rollout_evaluation](training/rollout_evaluation/) | Planned | Multi-step autoregressive rollout stability |
@@ -59,19 +124,27 @@ of the trained model. Can be run in any order once a checkpoint is available.
 | [analysis/hebbian_ablation](analysis/hebbian_ablation/) | P2 | Impact of Hebbian plasticity on learned dynamics |
 | [analysis/curriculum_training](analysis/curriculum_training/) | P2 | Does structured training order improve convergence? |
 
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `tools/visualize_pca_features.py` | PCA visualization of encoder dense features (V-JEPA-style) |
+
 ---
 
 ## Roadmap
 
 Near-term:
-- Quantitative rollout metrics (SSIM, LPIPS) for the 3-way comparison
+- Quantitative rollout metrics (SSIM, LPIPS) for PDE vs baselines
+- DeltaNet vs PDE-only ablation (compare rollout h3-h5 stability)
+- PCA feature visualization comparison across architectures
 - Linear probing on UCF-101 action classes
-- Temporal dynamics probing on UCF-101 data
 
 Mid-term:
 - Gradient planning on controlled environments
 - Additional datasets (KITTI, RoboNet)
 - Hebbian ablation study
+- Deep supervision impact study
 
 Long-term:
 - Real robot deployment with SO-101

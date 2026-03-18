@@ -2,16 +2,20 @@
 
 # FluidWorld
 
-A world model that replaces attention and recurrence with **reaction-diffusion PDEs**.
-Latent states evolve through Laplacian diffusion and learned reaction terms on a 2D
-spatial grid, giving the model a built-in inductive bias for spatial coherence,
-adaptive computation depth, and O(N) scaling in the number of spatial tokens.
+A world model built on **reaction-diffusion PDEs**, **DeltaNet temporal correction**,
+and **Titans persistent memory**. Latent states evolve through Laplacian diffusion
+and learned reaction terms on a 2D spatial grid, while DeltaNet provides content-based
+error correction and Titans maintains persistent scene knowledge across rollouts.
+
+O(N) scaling, no KV-cache, 867K parameters.
 
 **Paper**: [FluidWorld: PDE-Based World Modeling via Reaction-Diffusion Dynamics](paper/fluidworld.tex)
 
 ---
 
-## Key Results
+## Architecture History
+
+### v1 -- PDE Only (published)
 
 Three architectures, same parameter budget (~800K), same data (UCF-101 64x64),
 same encoder/decoder, same losses. Only the latent dynamics engine differs.
@@ -23,13 +27,23 @@ same encoder/decoder, same losses. Only the latent dynamics engine differs.
 | **Pred Loss** | 0.003 | 0.004 | 0.003 |
 | **Rollout coherence** | h=3+ | h=1 | h=1 |
 | **Spatial complexity** | O(N) | O(N^2) | O(N*k^2) |
-| **Training speed** | ~1 it/s | ~5.2 it/s | ~7.8 it/s |
 
-Single-step scalar metrics are comparable across all three models. The critical
-difference appears in multi-step rollouts: the PDE model maintains spatial coherence
-to horizon h=3 and beyond, while both baselines degrade visibly at h=2. The Laplacian
-diffusion operator acts as an implicit spatial regularizer that prevents exponential
-error accumulation during autoregressive generation.
+### v2 -- FluidWorld-Delta (current)
+
+The BeliefField (temporal state) is augmented with two new mechanisms:
+
+| Component | Role | Params | Complexity |
+|-----------|------|--------|------------|
+| **PDE** (Laplacian diffusion + reaction) | Spatial coherence | 133K | O(N) |
+| **DeltaNet** (delta rule temporal correction) | Content-based error correction | 66K | O(N*d^2) train, O(d^2) inference |
+| **Titans** (persistent memory) | Scene structure persistence | 82K | O(d) |
+
+Total model: **867K parameters** (+8% over v1). No KV-cache, constant inference memory.
+
+The three components have non-overlapping roles:
+- **PDE** answers "how does the world change?" (diffusion, motion)
+- **DeltaNet** answers "where did my prediction go wrong?" (error correction)
+- **Titans** answers "what is the world?" (persistent object/scene memory)
 
 ---
 
@@ -42,26 +56,30 @@ Input frame (3, 64, 64)
         |
   (128, 16, 16) latent grid
         |
-  FluidWorldLayer2D x2          <-- reaction-diffusion PDE
-  |  Laplacian diffusion             (adaptive step count)
+  FluidWorldLayer2D x3          <-- spatial PDE
+  |  Multi-scale Laplacian           (adaptive step count)
   |  Learned reaction terms
-  |  Bio mechanisms (fatigue, Hebbian)
+  |  Bio mechanisms (Hebbian)
         |
-  BeliefField                    <-- temporal state (PDE evolve)
+  BeliefField                    <-- temporal dynamics
+  |  write(state, observation)       Gated state update
+  |  evolve(state, stimulus)         PDE + DeltaNet + Titans
+  |  read(state)                     Spatial/vector readout
         |
   PixelDecoder
         |
   Output frame (3, 64, 64)
 ```
 
-Each `FluidWorldLayer2D` integrates the PDE:
+The `evolve()` step integrates the dual-ODE:
 
 ```
-du/dt = D * Laplacian(u) + R(u)
+du/dt = Laplacian_diffusion(u)    -- spatial coherence (PDE)
+      + DeltaNet(u)               -- temporal error correction
+      + Reaction(u)               -- semantic nonlinearity
+      + alpha * Titans_memory     -- persistent scene context
+      + stimulus                  -- external action input
 ```
-
-where D is a learned diffusion coefficient and R is a nonlinear reaction network.
-The number of integration steps adapts per-sample based on a learned halting signal.
 
 ---
 
@@ -85,10 +103,10 @@ python scripts/prepare_ucf101.py --source-dir path/to/UCF-101 --out-dir data/ucf
 
 ### Train
 
-FluidWorld (PDE):
+FluidWorld-Delta (PDE + DeltaNet + Titans):
 
 ```bash
-python experiments/training/pixel_prediction/train_pixel.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000
+python experiments/training/pixel_prediction/train_pixel.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000 --no-fatigue --var-weight 0.1 --var-target 0.3
 ```
 
 Transformer baseline:
@@ -115,6 +133,16 @@ To overlay all three runs:
 tensorboard --logdir runs/phase1_pixel:PDE,runs/phase2_transformer:Transformer,runs/phase2_convlstm:ConvLSTM
 ```
 
+### Visualize dense features (PCA)
+
+After training, visualize encoder feature quality:
+
+```bash
+python tools/visualize_pca_features.py --checkpoint checkpoints/phase1_pixel/model_step_8000.pt --data-dir data/ucf101_64 --n-samples 16
+```
+
+Output: `paper/figures/pca/pca_grid.png` (top row: original frames, bottom row: PCA of encoder features mapped to RGB).
+
 ### Test
 
 ```bash
@@ -131,8 +159,8 @@ FluidWorld/
 │   └── core/
 │       ├── world_model_v2.py          PDE world model
 │       ├── fluid_world_layer.py       Reaction-diffusion layer
-│       ├── belief_field.py            Temporal state (PDE-evolved)
-│       ├── bio_mechanisms.py          Fatigue, Hebbian plasticity
+│       ├── belief_field.py            BeliefField (PDE + DeltaNet + Titans)
+│       ├── bio_mechanisms.py          Hebbian plasticity, lateral inhibition
 │       ├── transformer_world_model.py Transformer baseline
 │       ├── convlstm_world_model.py    ConvLSTM baseline
 │       ├── decoder.py                 Pixel decoder
@@ -151,7 +179,7 @@ FluidWorld/
 │       ├── hebbian_ablation/    Plasticity mechanism impact
 │       └── ...
 ├── scripts/                 Data preparation
-├── tools/                   Visualization and inspection
+├── tools/                   Visualization (PCA features, etc.)
 ├── tests/                   Smoke tests
 └── paper/                   LaTeX source and figures
 ```
@@ -166,7 +194,7 @@ the full roadmap.
 The experiments follow a sequential pipeline. Each step builds on the previous one.
 
 ```
-1. training/proprioception        MLP baseline on robot proprio (planned, needs robot data)
+1. training/proprioception        MLP baseline on robot proprio (planned)
        |
 2. training/pixel_prediction      PDE world model on UCF-101 video        [DONE]
        |
@@ -191,6 +219,34 @@ analysis/multiscale_rollout     How does imagination quality degrade with horizo
 analysis/hebbian_ablation       Impact of Hebbian plasticity on dynamics
 analysis/curriculum_training    Does structured training order help convergence?
 ```
+
+---
+
+## Changelog
+
+### v2 (FluidWorld-Delta) -- March 2026
+
+- **DeltaNet temporal correction** in BeliefField: content-based error-driven
+  state update using the delta rule (linear attention with error correction).
+  Replaces blind PDE-only temporal dynamics with learned correction.
+- **Titans persistent memory**: fast-weight associative memory that stores scene
+  structure and updates online at inference. Replaces MemoryPump.
+- **SynapticFatigue disabled by default**: was causing feature collapse
+  (Dead_Dims reaching 30K/32K). Use `--no-fatigue` flag.
+- **PCA feature visualization**: `tools/visualize_pca_features.py` for
+  V-JEPA-style dense feature quality inspection.
+- **Standalone**: all PDE modules (diffusion, FluidLayer2D, PatchEmbed) are now
+  bundled in `fluidworld/core/`. No external FluidVLA dependency required.
+- **Variance regularization**: `--var-weight` / `--var-target` flags to prevent
+  feature collapse without relying on SynapticFatigue.
+
+### v1 (PDE Only) -- February 2026
+
+- Initial release: reaction-diffusion PDE world model.
+- 3-way ablation (PDE vs Transformer vs ConvLSTM) at matched ~800K params.
+- Bio mechanisms: SynapticFatigue, LateralInhibition, HebbianDiffusion.
+- BeliefField with PDE-based temporal evolution.
+- Multi-step rollout evaluation up to h=5.
 
 ---
 

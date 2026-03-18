@@ -17,7 +17,7 @@ Planned. Requires Phase 4 complete.
 
 ## Integration targets
 
-- FluidVLA features: spatial-aware pooling, action chunking, delta-action normalization
+- Spatial-aware pooling, action chunking, delta-action normalization
 - Action MSE < 5.0
 - Cosine similarity > 0.7
 - Inference latency < 50ms

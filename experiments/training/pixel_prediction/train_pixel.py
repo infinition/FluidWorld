@@ -102,6 +102,8 @@ def train_phase1(args):
         use_hebbian=args.use_hebbian,
         hebbian_lr=args.hebbian_lr,
         hebbian_decay=args.hebbian_decay,
+        use_deltanet=not args.no_deltanet,
+        use_titans=not args.no_titans,
     ).to(device)
 
     params = model.count_parameters()
@@ -545,5 +547,9 @@ if __name__ == "__main__":
     parser.add_argument("--no-hebbian", dest="use_hebbian", action="store_false")
     parser.add_argument("--hebbian-lr", type=float, default=0.01)
     parser.add_argument("--hebbian-decay", type=float, default=0.99)
+    parser.add_argument("--no-deltanet", action="store_true", default=False,
+                        help="Disable DeltaNet temporal correction (ablation)")
+    parser.add_argument("--no-titans", action="store_true", default=False,
+                        help="Disable Titans persistent memory (ablation)")
 
     train_phase1(parser.parse_args())

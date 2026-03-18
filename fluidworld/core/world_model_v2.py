@@ -234,6 +234,8 @@ class FluidWorldModelV2(nn.Module):
         use_hebbian: bool = True,
         hebbian_lr: float = 0.01,
         hebbian_decay: float = 0.99,
+        use_deltanet: bool = True,
+        use_titans: bool = True,
     ):
         super().__init__()
         self.d_model = d_model
@@ -302,6 +304,8 @@ class FluidWorldModelV2(nn.Module):
             use_hebbian=use_hebbian,
             hebbian_lr=hebbian_lr,
             hebbian_decay=hebbian_decay,
+            use_deltanet=use_deltanet,
+            use_titans=use_titans,
         )
 
         # ── Pixel Decoder ──
