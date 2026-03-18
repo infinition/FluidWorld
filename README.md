@@ -1,6 +1,5 @@
 <img width="2453" height="1472" alt="Gemini_Generated_Image_t0ym24t0ym24t0ym" src="https://github.com/user-attachments/assets/649b28ad-69d4-4037-ab49-0cc2637bb302" />
 
-
 # FluidWorld
 
 A world model that replaces attention and recurrence with **reaction-diffusion PDEs**.
