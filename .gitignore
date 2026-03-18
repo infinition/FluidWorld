@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+
+# Data (large files -- see scripts/prepare_ucf101.py to regenerate)
+data/
+checkpoints/
+runs/
+
+# Internal docs (not for publication)
+_archive/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.venv/
+venv/
+*.log

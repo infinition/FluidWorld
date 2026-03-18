@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FluidWorld Inspector</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0d1117; color:#c9d1d9; font-family:'Segoe UI',system-ui,sans-serif; }
+h1 { text-align:center; padding:12px; font-size:20px; color:#58a6ff; border-bottom:1px solid #21262d; }
+h1 span { color:#8b949e; font-size:13px; font-weight:normal; margin-left:12px; }
+
+.grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:8px; }
+.panel { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:12px; }
+.panel h2 { font-size:14px; color:#58a6ff; margin-bottom:8px; border-bottom:1px solid #21262d; padding-bottom:4px; }
+.panel.wide { grid-column: span 2; }
+.panel.full { grid-column: span 3; }
+
+select, button, input { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:4px 8px; font-size:12px; }
+button { cursor:pointer; }
+button:hover { background:#30363d; }
+button.primary { background:#238636; border-color:#2ea043; }
+button.primary:hover { background:#2ea043; }
+label { font-size:12px; color:#8b949e; }
+
+canvas { border:1px solid #21262d; border-radius:4px; image-rendering:pixelated; }
+
+.stat { display:inline-block; margin:4px 8px; }
+.stat .val { font-size:18px; font-weight:bold; color:#f0f6fc; }
+.stat .lbl { font-size:11px; color:#8b949e; }
+
+.bar-row { display:flex; align-items:center; margin:3px 0; font-size:11px; }
+.bar-row .name { width:50px; text-align:right; margin-right:6px; color:#8b949e; }
+.bar-outer { flex:1; height:10px; background:#21262d; border-radius:3px; overflow:hidden; }
+.bar-inner { height:100%; border-radius:3px; transition:width 0.3s; }
+
+.legend { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; font-size:11px; }
+.legend span { display:flex; align-items:center; gap:3px; }
+.legend .dot { width:8px; height:8px; border-radius:50%; }
+
+input[type=range] { width:100%; }
+
+.player { display:flex; align-items:center; gap:8px; margin:8px 0; }
+.player button { font-size:14px; padding:4px 12px; }
+.timeline { flex:1; height:4px; background:#21262d; border-radius:2px; position:relative; cursor:pointer; }
+.timeline .pos { height:100%; background:#58a6ff; border-radius:2px; }
+
+.status { font-size:11px; color:#8b949e; text-align:center; padding:4px; }
+.status.ok { color:#3fb950; }
+.status.error { color:#f85149; }
+
+.controls-row { display:flex; gap:8px; align-items:end; margin-bottom:8px; flex-wrap:wrap; }
+.controls-row > div { display:flex; flex-direction:column; gap:2px; }
+</style>
+</head>
+<body>
+
+<h1>FluidWorld Inspector <span id="ckptLabel">--</span></h1>
+
+<div class="grid">
+
+  <!-- Panel: Checkpoint -->
+  <div class="panel">
+    <h2>Checkpoint</h2>
+    <div>
+      <select id="ckptSelect" style="width:100%; margin-bottom:6px;"></select>
+      <div class="controls-row">
+        <div>
+          <label>Model</label>
+          <select id="modelVersion">
+            <option value="v2" selected>v2 (UCF-101)</option>
+            <option value="v1">v1 (MNIST)</option>
+          </select>
+        </div>
+        <div>
+          <label>Channels</label>
+          <select id="inChannels">
+            <option value="3" selected>3 (RGB)</option>
+            <option value="1">1 (Gray)</option>
+          </select>
+        </div>
+        <button class="primary" onclick="loadSelectedCkpt()">Load</button>
+        <button onclick="refreshCkpts()">Refresh</button>
+      </div>
+    </div>
+    <div id="ckptStats" style="margin-top:8px; font-size:12px;"></div>
+  </div>
+
+  <!-- Panel: Image Input -->
+  <div class="panel">
+    <h2>Single Frame Encoding</h2>
+    <div class="controls-row">
+      <div>
+        <label>Sequence</label>
+        <input type="number" id="seqIdx" value="0" min="0" max="9999" style="width:60px;">
+      </div>
+      <div>
+        <label>Frame</label>
+        <input type="number" id="frameIdx" value="0" min="0" max="19" style="width:60px;">
+      </div>
+      <button class="primary" onclick="encodeFrame()">Encode</button>
+    </div>
+    <canvas id="inputCanvas" width="128" height="128" style="background:#000;"></canvas>
+    <div id="pdeSteps" class="status" style="margin-top:4px;"></div>
+  </div>
+
+  <!-- Panel: Encoder Features (PCA RGB) -->
+  <div class="panel">
+    <h2>Encoder Features (PCA &rarr; RGB)</h2>
+    <canvas id="pcaCanvas" width="160" height="160" style="background:#000;"></canvas>
+    <div style="margin-top:4px;">
+      <div class="stat"><span class="val" id="featStd">--</span><br><span class="lbl">Feature Std</span></div>
+      <div class="stat"><span class="val" id="featMin">--</span><br><span class="lbl">Std Min</span></div>
+      <div class="stat"><span class="val" id="featMax">--</span><br><span class="lbl">Std Max</span></div>
+    </div>
+  </div>
+
+  <!-- Panel: Channel Heatmaps -->
+  <div class="panel wide">
+    <h2>Top 8 Active Channels</h2>
+    <div id="channelGrid" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+  </div>
+
+  <!-- Panel: Pooled Feature Vector -->
+  <div class="panel">
+    <h2>Pooled Feature Vector (128d)</h2>
+    <canvas id="pooledCanvas" width="256" height="80" style="background:#000; width:100%;"></canvas>
+  </div>
+
+  <!-- Panel: Sequence Player & BeliefField -->
+  <div class="panel wide">
+    <h2>Sequence &amp; BeliefField Evolution</h2>
+    <div class="player">
+      <button onclick="playSequence()">&#9654; Play</button>
+      <button onclick="stepSequence(-1)">&laquo;</button>
+      <button onclick="stepSequence(1)">&raquo;</button>
+      <div class="timeline" id="timeline"><div class="pos" id="timelinePos" style="width:0%"></div></div>
+      <span id="frameLabel" style="font-size:12px; width:50px;">0/0</span>
+    </div>
+    <div style="display:flex; gap:12px;">
+      <div>
+        <label>Input Frame</label><br>
+        <canvas id="seqFrameCanvas" width="128" height="128" style="background:#000;"></canvas>
+      </div>
+      <div>
+        <label>BeliefField Energy</label><br>
+        <canvas id="beliefCanvas" width="160" height="160" style="background:#000;"></canvas>
+      </div>
+      <div style="flex:1;">
+        <label>Prediction Quality</label>
+        <div id="predBars" style="margin-top:8px;"></div>
+      </div>
+    </div>
+    <div class="controls-row" style="margin-top:8px;">
+      <div>
+        <label>Sequence</label>
+        <input type="number" id="seqPlayIdx" value="0" min="0" style="width:60px;">
+      </div>
+      <div>
+        <label>Frames</label>
+        <input type="number" id="seqPlayN" value="10" min="2" max="20" style="width:60px;">
+      </div>
+      <button class="primary" onclick="loadSequence()">Load Sequence</button>
+    </div>
+  </div>
+
+  <!-- Panel: Feature Space (PCA scatter) -->
+  <div class="panel">
+    <h2>Feature Space (PCA 2D)</h2>
+    <canvas id="scatterCanvas" width="280" height="280" style="background:#0d1117; width:100%;"></canvas>
+    <div class="legend" id="scatterLegend"></div>
+    <div style="margin-top:6px;">
+      <label>Samples:</label>
+      <input type="number" id="pcaN" value="500" min="100" max="2000" style="width:70px;">
+      <button class="primary" onclick="computePCA()">Compute PCA</button>
+      <span id="pcaStatus" class="status"></span>
+    </div>
+    <div id="rankInfo" style="font-size:12px; margin-top:4px;"></div>
+  </div>
+
+</div>
+
+<script>
+const API = '';
+const COLORS = ['#f85149','#58a6ff','#3fb950','#d29922','#bc8cff','#f778ba','#79c0ff','#56d364','#e3b341','#db61a2'];
+
+let seqData = null;
+let seqFrame = 0;
+let seqPlaying = false;
+
+function $(id) { return document.getElementById(id); }
+
+async function api(path, method='GET', body=null) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+function drawHeatmap(canvas, data, cw, ch, colormap='viridis') {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const rows = data.length, cols = data[0].length;
+  const pw = W / cols, ph = H / rows;
+  ctx.clearRect(0, 0, W, H);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const v = Math.max(0, Math.min(1, data[y][x]));
+      ctx.fillStyle = heatColor(v, colormap);
+      ctx.fillRect(x * pw, y * ph, pw + 1, ph + 1);
+    }
+  }
+}
+
+function heatColor(v, cmap) {
+  if (cmap === 'viridis') {
+    const r = Math.round(68 + v * 187);
+    const g = Math.round(1 + v * 205);
+    const b = Math.round(84 + (1 - v) * 100);
+    return `rgb(${r},${g},${b})`;
+  }
+  const r = Math.round(v * 255);
+  const g = Math.round(v * v * 200);
+  const b = Math.round((1 - v) * 180 + v * 50);
+  return `rgb(${r},${g},${b})`;
+}
+
+function drawRGB(canvas, rgb) {
+  const ctx = canvas.getContext('2d');
+  const H = rgb[0].length, W = rgb[0][0].length;
+  const cw = canvas.width, ch = canvas.height;
+  const pw = cw / W, ph = ch / H;
+  ctx.clearRect(0, 0, cw, ch);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      ctx.fillStyle = `rgb(${rgb[0][y][x]},${rgb[1][y][x]},${rgb[2][y][x]})`;
+      ctx.fillRect(x * pw, y * ph, pw + 1, ph + 1);
+    }
+  }
+}
+
+function drawImage(canvas, data) {
+  const ctx = canvas.getContext('2d');
+  const cw = canvas.width, ch = canvas.height;
+  ctx.clearRect(0, 0, cw, ch);
+
+  if (!Array.isArray(data) || data.length === 0) return;
+
+  // Detect format: [H][W] grayscale or [H][W][3] color or [C][H][W]
+  if (typeof data[0][0] === 'number') {
+    // Grayscale: [H][W]
+    const H = data.length, W = data[0].length;
+    const pw = cw / W, ph = ch / H;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const v = Math.round(Math.max(0, Math.min(1, data[y][x])) * 255);
+        ctx.fillStyle = `rgb(${v},${v},${v})`;
+        ctx.fillRect(x * pw, y * ph, pw + 1, ph + 1);
+      }
+    }
+  } else if (Array.isArray(data[0][0]) && data[0][0].length === 3) {
+    // Color HWC: [H][W][3]
+    const H = data.length, W = data[0].length;
+    const pw = cw / W, ph = ch / H;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const r = Math.round(Math.max(0, Math.min(1, data[y][x][0])) * 255);
+        const g = Math.round(Math.max(0, Math.min(1, data[y][x][1])) * 255);
+        const b = Math.round(Math.max(0, Math.min(1, data[y][x][2])) * 255);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(x * pw, y * ph, pw + 1, ph + 1);
+      }
+    }
+  } else if (data.length === 3 && Array.isArray(data[0][0])) {
+    // Color CHW: [3][H][W]
+    drawRGB(canvas, data.map(ch => ch.map(row => row.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255)))));
+  }
+}
+
+function drawBarChart(canvas, values, maxVal) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const n = values.length;
+  const bw = W / n;
+  for (let i = 0; i < n; i++) {
+    const v = values[i];
+    const norm = Math.abs(v) / (maxVal || 1);
+    const h = norm * H * 0.9;
+    const color = v >= 0 ? '#58a6ff' : '#f85149';
+    ctx.fillStyle = color;
+    if (v >= 0) {
+      ctx.fillRect(i * bw, H/2 - h, bw - 0.5, h);
+    } else {
+      ctx.fillRect(i * bw, H/2, bw - 0.5, h);
+    }
+  }
+  ctx.strokeStyle = '#30363d';
+  ctx.beginPath();
+  ctx.moveTo(0, H/2);
+  ctx.lineTo(W, H/2);
+  ctx.stroke();
+}
+
+// -- Actions --
+
+async function refreshCkpts() {
+  const data = await api('/api/checkpoints');
+  const sel = $('ckptSelect');
+  sel.innerHTML = '';
+  for (const c of data.checkpoints || []) {
+    const opt = document.createElement('option');
+    opt.value = c.path;
+    opt.textContent = `${c.name} (${c.size_mb} MB)`;
+    sel.appendChild(opt);
+  }
+}
+
+async function loadSelectedCkpt() {
+  const path = $('ckptSelect').value;
+  if (!path) return;
+  $('ckptLabel').textContent = 'Loading...';
+  const version = $('modelVersion').value;
+  const channels = parseInt($('inChannels').value);
+  const info = await api('/api/checkpoint/load', 'POST', {
+    path, model_version: version, in_channels: channels, stimulus_dim: 1
+  });
+  if (info.error) {
+    $('ckptLabel').textContent = 'ERROR: ' + info.error;
+    return;
+  }
+  showCkptInfo(info);
+}
+
+function showCkptInfo(info) {
+  $('ckptLabel').textContent = `Step ${info.global_step} | Epoch ${info.epoch} | ${(info.params_total||0).toLocaleString()} params`;
+  $('ckptStats').innerHTML = `
+    <div>d_model: ${info.d_model} | channels: ${info.in_channels} | model: ${info.model_version || '?'}</div>
+    <div style="color:#8b949e; font-size:11px; margin-top:4px; word-break:break-all;">${info.path}</div>
+  `;
+}
+
+async function encodeFrame() {
+  const si = parseInt($('seqIdx').value) || 0;
+  const fi = parseInt($('frameIdx').value) || 0;
+
+  const testData = await api(`/api/test-images?seq=${si}&n=${fi + 1}`);
+  if (testData.error) { $('pdeSteps').textContent = testData.error; return; }
+
+  if (testData.raw && testData.raw[fi]) {
+    drawImage($('inputCanvas'), testData.raw[fi]);
+  }
+
+  const result = await api('/api/encode', 'POST', { seq_index: si, frame_index: fi });
+  if (result.error) { $('pdeSteps').textContent = result.error; return; }
+
+  if (result.pca_rgb) {
+    drawRGB($('pcaCanvas'), result.pca_rgb);
+  }
+
+  const grid = $('channelGrid');
+  grid.innerHTML = '';
+  for (const ch of result.top_channels || []) {
+    const div = document.createElement('div');
+    div.style.textAlign = 'center';
+    const lbl = document.createElement('div');
+    lbl.style.fontSize = '10px';
+    lbl.style.color = '#8b949e';
+    lbl.textContent = `Ch ${ch}`;
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    c.style.borderRadius = '3px';
+    div.appendChild(lbl);
+    div.appendChild(c);
+    grid.appendChild(div);
+    if (result.channel_maps[ch]) {
+      drawHeatmap(c, result.channel_maps[ch], 64, 64, 'inferno');
+    }
+  }
+
+  if (result.pooled) {
+    const maxV = Math.max(...result.pooled.map(Math.abs));
+    drawBarChart($('pooledCanvas'), result.pooled, maxV);
+  }
+
+  $('featStd').textContent = (result.feature_std || 0).toFixed(3);
+  $('featMin').textContent = (result.feature_std_min || 0).toFixed(3);
+  $('featMax').textContent = (result.feature_std_max || 0).toFixed(3);
+  $('pdeSteps').textContent = `PDE steps: ${(result.pde_steps || []).join(', ')} | spatial: ${(result.spatial_shape||[]).join('x')}`;
+  $('pdeSteps').className = 'status ok';
+}
+
+async function loadSequence() {
+  const si = parseInt($('seqPlayIdx').value) || 0;
+  const nf = parseInt($('seqPlayN').value) || 10;
+
+  const testData = await api(`/api/test-images?seq=${si}&n=${nf}`);
+  const result = await api('/api/sequence', 'POST', { seq_index: si, n_frames: nf });
+
+  if (result.error) { $('frameLabel').textContent = result.error; return; }
+
+  seqData = { ...result, rawFrames: testData.raw || [], si };
+  seqFrame = 0;
+  renderSequenceFrame();
+}
+
+function renderSequenceFrame() {
+  if (!seqData) return;
+  const t = seqFrame;
+  const n = seqData.n_frames;
+
+  $('frameLabel').textContent = `${t + 1}/${n}`;
+  $('timelinePos').style.width = `${(t + 1) / n * 100}%`;
+
+  if (seqData.rawFrames[t]) {
+    drawImage($('seqFrameCanvas'), seqData.rawFrames[t]);
+  }
+
+  if (seqData.states[t]) {
+    const em = seqData.states[t].energy_map;
+    let maxE = 0;
+    for (const row of em) for (const v of row) if (v > maxE) maxE = v;
+    const norm = em.map(row => row.map(v => v / (maxE || 1)));
+    drawHeatmap($('beliefCanvas'), norm, 160, 160, 'inferno');
+  }
+
+  const predDiv = $('predBars');
+  predDiv.innerHTML = '';
+  if (t > 0 && seqData.predictions[t - 1]) {
+    const p = seqData.predictions[t - 1];
+    predDiv.innerHTML = `
+      <div class="bar-row">
+        <span class="name">Cosine</span>
+        <div class="bar-outer">
+          <div class="bar-inner" style="width:${Math.max(0, p.cosine_sim) * 100}%; background:#58a6ff;"></div>
+        </div>
+        <span style="margin-left:6px; font-size:12px;">${p.cosine_sim.toFixed(3)}</span>
+      </div>
+      <div class="bar-row">
+        <span class="name">MSE</span>
+        <div class="bar-outer">
+          <div class="bar-inner" style="width:${Math.min(1, p.mse) * 100}%; background:#f85149;"></div>
+        </div>
+        <span style="margin-left:6px; font-size:12px;">${p.mse.toFixed(3)}</span>
+      </div>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">
+        Energy: ${seqData.states[t].mean_energy.toFixed(4)}
+      </div>
+    `;
+  } else {
+    predDiv.innerHTML = '<div style="font-size:11px; color:#8b949e;">Frame 1: no prior prediction</div>';
+  }
+}
+
+function stepSequence(delta) {
+  if (!seqData) return;
+  seqFrame = Math.max(0, Math.min(seqData.n_frames - 1, seqFrame + delta));
+  renderSequenceFrame();
+}
+
+function playSequence() {
+  if (!seqData || seqPlaying) return;
+  seqPlaying = true;
+  seqFrame = 0;
+  const iv = setInterval(() => {
+    seqFrame++;
+    if (seqFrame >= seqData.n_frames) {
+      seqFrame = seqData.n_frames - 1;
+      seqPlaying = false;
+      clearInterval(iv);
+    }
+    renderSequenceFrame();
+  }, 400);
+}
+
+async function computePCA() {
+  const n = parseInt($('pcaN').value) || 500;
+  $('pcaStatus').textContent = 'Computing...';
+  $('pcaStatus').className = 'status';
+
+  const result = await api('/api/pca', 'POST', { n_samples: n });
+  if (result.error) {
+    $('pcaStatus').textContent = result.error;
+    $('pcaStatus').className = 'status error';
+    return;
+  }
+
+  const canvas = $('scatterCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = 20;
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 4; i++) {
+    const p = pad + i * (W - 2 * pad) / 4;
+    ctx.beginPath(); ctx.moveTo(p, pad); ctx.lineTo(p, H - pad); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad, p); ctx.lineTo(W - pad, p); ctx.stroke();
+  }
+
+  for (const pt of result.points) {
+    const x = pad + pt.x * (W - 2 * pad);
+    const y = pad + pt.y * (H - 2 * pad);
+    ctx.fillStyle = COLORS[pt.label % 10];
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1.0;
+
+  const legend = $('scatterLegend');
+  legend.innerHTML = '';
+  const labels = [...new Set(result.points.map(p => p.label))].sort((a,b) => a-b);
+  for (const l of labels) {
+    legend.innerHTML += `<span><span class="dot" style="background:${COLORS[l % 10]}"></span>${l}</span>`;
+  }
+
+  $('pcaStatus').textContent = `${result.n_samples} points (${result.method})`;
+  $('pcaStatus').className = 'status ok';
+  $('rankInfo').innerHTML = `Effective Rank: <b>${result.effective_rank.toFixed(1)}</b> / 128`;
+}
+
+// -- Init --
+async function init() {
+  await refreshCkpts();
+  const info = await api('/api/checkpoint/info');
+  if (info.path) {
+    showCkptInfo(info);
+    const sel = $('ckptSelect');
+    for (const opt of sel.options) {
+      if (opt.value === info.path) { opt.selected = true; break; }
+    }
+    // Sync UI with loaded model
+    if (info.model_version) $('modelVersion').value = info.model_version;
+    if (info.in_channels) $('inChannels').value = String(info.in_channels);
+  }
+}
+
+init();
+</script>
+</body>
+</html>
