@@ -156,7 +156,9 @@ class FluidWorldLayer2D(nn.Module):
             self.beta = None
 
     def _dt(self) -> torch.Tensor:
-        return self.log_dt.exp().clamp(0.005, 0.35)
+        # Upper bound 0.15 (not 0.35): CFL analysis (Test 08) shows dt>0.10
+        # causes oscillatory instabilities. 0.15 provides safety margin.
+        return self.log_dt.exp().clamp(0.005, 0.15)
 
     def _alpha(self) -> torch.Tensor:
         return F.softplus(self.alpha_global)

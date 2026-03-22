@@ -358,7 +358,9 @@ class BeliefField(nn.Module):
 
     @property
     def dt(self) -> torch.Tensor:
-        return self.log_dt.exp().clamp(0.01, 0.3)
+        # Upper bound 0.15 (not 0.3): CFL analysis (Test 08) shows dt>0.10
+        # causes oscillatory instabilities. 0.15 provides safety margin.
+        return self.log_dt.exp().clamp(0.01, 0.15)
 
     def init_state(
         self,

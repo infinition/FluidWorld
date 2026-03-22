@@ -224,7 +224,7 @@ class FluidLayer2D(_FluidLayerBase):
 
         stop_history: List[float] = []
         diff_turbulences: List[torch.Tensor] = []
-        step_energies: List[torch.Tensor] = []  # v8: energie 100% differentiable
+        step_energies: List[torch.Tensor] = []  # v8: fully differentiable energy
 
         equilibrium_step = self.max_steps
 
@@ -278,7 +278,7 @@ class FluidLayer2D(_FluidLayerBase):
             lap_energy = diff_flat.abs().mean() if self.use_pde else self._safe_zero_like_scalar(u)
             diff_turb = stop_turb + 0.05 * step_energy + 0.01 * lap_energy
             diff_turbulences.append(diff_turb)
-            step_energies.append(step_energy)  # v8: energie brute du update
+            step_energies.append(step_energy)  # v8: raw update energy
 
             stop_val = float(stop_turb.item())
             stop_history.append(stop_val)
@@ -298,7 +298,7 @@ class FluidLayer2D(_FluidLayerBase):
             else self._safe_zero_like_scalar(u)
         )
 
-        # v8: energie PDE 100% differentiable
+        # v8: fully differentiable PDE energy
         step_energy_mean = (
             torch.stack(step_energies).mean()
             if step_energies
@@ -400,7 +400,7 @@ class FluidLayerVideo(_FluidLayerBase):
 
         stop_history: List[float] = []
         diff_turbulences: List[torch.Tensor] = []
-        step_energies: List[torch.Tensor] = []  # v8: energie 100% differentiable
+        step_energies: List[torch.Tensor] = []  # v8: fully differentiable energy
 
         equilibrium_step = self.max_steps
         prev_probe = self._make_stop_probe(u).detach()
@@ -450,7 +450,7 @@ class FluidLayerVideo(_FluidLayerBase):
             lap_energy = diff_flat.abs().mean() if self.use_pde else self._safe_zero_like_scalar(u)
             diff_turb = stop_turb + 0.05 * step_energy + 0.01 * lap_energy
             diff_turbulences.append(diff_turb)
-            step_energies.append(step_energy)  # v8: energie brute du update
+            step_energies.append(step_energy)  # v8: raw update energy
 
             stop_val = float(stop_turb.item())
             stop_history.append(stop_val)
@@ -470,7 +470,7 @@ class FluidLayerVideo(_FluidLayerBase):
             else self._safe_zero_like_scalar(u)
         )
 
-        # v8: energie PDE 100% differentiable
+        # v8: fully differentiable PDE energy
         step_energy_mean = (
             torch.stack(step_energies).mean()
             if step_energies

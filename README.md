@@ -2,48 +2,79 @@
 
 # FluidWorld
 
-A world model built on **reaction-diffusion PDEs**, **DeltaNet temporal correction**,
-and **Titans persistent memory**. Latent states evolve through Laplacian diffusion
-and learned reaction terms on a 2D spatial grid, while DeltaNet provides content-based
-error correction and Titans maintains persistent scene knowledge across rollouts.
+### A world model that replaces attention with physics. And self-repairs its own predictions.
 
-O(N) scaling, no KV-cache, 867K parameters.
+FluidWorld is a proof-of-concept world model built on reaction-diffusion PDEs. No attention. No KV-cache. The Laplacian operator *is* the computation. And it produces something no Transformer or ConvLSTM has demonstrated: **autopoietic self-repair**, where the model spontaneously corrects its own prediction errors through the physics of diffusion.
 
-**Paper**: [FluidWorld: PDE-Based World Modeling via Reaction-Diffusion Dynamics](paper/fluidworld.tex)
+Trained with a latent prediction objective, the PDE substrate maintains cosine similarity of 0.827 across 19 autoregressive steps. It predicts in abstract representation space, not pixels, and encodes dynamics non-linearly.
+
+800K parameters. One consumer GPU. Results that challenge the assumption that attention is necessary for world modeling.
+
+> **Paper:** [Reaction-Diffusion Dynamics as a Predictive Substrate for World Models](paper/fluidworld.tex)
 
 ---
 
-## Architecture History
+## Why This Matters
 
-### v1 -- PDE Only (published)
+### 1. The model heals itself
 
-Three architectures, same parameter budget (~800K), same data (UCF-101 64x64),
-same encoder/decoder, same losses. Only the latent dynamics engine differs.
+During autoregressive rollout, prediction quality degrades. Every world model has this problem. But FluidWorld does something no attention-based model does: after degrading, it **recovers**.
+
+Over 500 rollouts on Moving MNIST, SSIM drops from 0.778 to 0.287 by step 6, then climbs back to 0.508 by step 9. Two thirds of all rollouts show this recovery. The statistics leave no room for doubt:
+
+| | |
+|---|---|
+| Recovery rate | **66.8%** (334 / 500 rollouts) |
+| p-value | **1.67 x 10^-49** |
+| Cohen's d | **0.739** (medium-to-large effect) |
+| Mechanism | Laplacian diffusion dissipates high-frequency errors |
+
+Transformers and ConvLSTMs only decay. They never recover. The difference is structural: the Laplacian is a low-pass filter that smooths prediction errors at every integration step. Blurry intermediate predictions are not a defect. They are the self-repair mechanism.
+
+### 2. Destroy half the internal state. It comes back.
+
+Corrupt 50% of the BeliefField (the model's persistent latent state) during rollout. Inject noise, zero out channels, shuffle spatial positions. The model recovers in 3 to 7 steps. No explicit repair mechanism. No retraining. The Laplacian fills corrupted regions via diffusion from intact neighbors, and RMSNorm re-normalizes amplitude.
+
+Push corruption to 90%. The model still works. No cliff effect. Graceful degradation all the way up. This kind of robustness has implications for deployed world models operating under sensor noise or partial observability.
+
+### 3. Stable latent prediction across 19 autoregressive steps
+
+Training with a JEPA-style latent objective (target encoder + VICReg, inspired by Y. LeCun's JEPA framework) produces abstract representations that barely degrade over time:
+
+| Rollout step | Cosine similarity |
+|---|---|
+| Step 1 | 0.833 |
+| Step 10 | 0.827 |
+| Step 19 | 0.827 |
+
+For comparison, Pixel and Random models sit near zero. The PDE dynamics produce stable internal predictions without any pixel-level supervision.
+
+An MLP probe confirms the representations encode velocity non-linearly (R^2 jumps from 0.29 to 0.60), while Pixel and Random both *drop* under the same probe. The JEPA-style PDE is the only model whose dynamics encoding *improves* with a non-linear readout.
+
+### 4. O(N) vs O(N^2): the gap grows with resolution
+
+| Resolution | Attention ops | PDE diffusion ops | Ratio |
+|---|---|---|---|
+| 16x16 (256 tokens) | 65K | 256 | 256x |
+| 64x64 (4K tokens) | 16.7M | 4K | 4,096x |
+| 128x128 (16K tokens) | 268M | 16K | **16,384x** |
+
+At current resolution the difference is negligible. At the resolutions real-world robotics and autonomous driving require, PDE diffusion is orders of magnitude cheaper than attention.
+
+### 5. Three-way ablation: same parameters, same data, different substrate
+
+All three models: ~800K parameters, identical encoder, identical decoder, identical losses, identical data (UCF-101 64x64). The *only* difference is the predictive engine.
 
 | | FluidWorld (PDE) | Transformer | ConvLSTM |
 |---|---|---|---|
-| **Parameters** | 801K | 801K | 802K |
-| **Recon Loss** | 0.001 | 0.002 | 0.001 |
-| **Pred Loss** | 0.003 | 0.004 | 0.003 |
-| **Rollout coherence** | h=3+ | h=1 | h=1 |
-| **Spatial complexity** | O(N) | O(N^2) | O(N*k^2) |
+| Recon Loss | **0.001** | 0.002 | 0.001 |
+| Pred Loss | 0.003 | 0.004 | 0.003 |
+| Spatial Std | **1.16** | 1.05 | 1.12 |
+| Effective Rank | **~20K** | ~16.5K | ~19K |
+| Rollout coherence | **h=3** | h=1 | h=1 |
+| Spatial complexity | **O(N)** | O(N^2) | O(N) |
 
-### v2 -- FluidWorld-Delta (current)
-
-The BeliefField (temporal state) is augmented with two new mechanisms:
-
-| Component | Role | Params | Complexity |
-|-----------|------|--------|------------|
-| **PDE** (Laplacian diffusion + reaction) | Spatial coherence | 133K | O(N) |
-| **DeltaNet** (delta rule temporal correction) | Content-based error correction | 66K | O(N*d^2) train, O(d^2) inference |
-| **Titans** (persistent memory) | Scene structure persistence | 82K | O(d) |
-
-Total model: **867K parameters** (+8% over v1). No KV-cache, constant inference memory.
-
-The three components have non-overlapping roles:
-- **PDE** answers "how does the world change?" (diffusion, motion)
-- **DeltaNet** answers "where did my prediction go wrong?" (error correction)
-- **Titans** answers "what is the world?" (persistent object/scene memory)
+Single-step metrics are intentionally comparable. That was the point: isolate what happens when you chain predictions. The PDE maintains spatial structure 1 to 2 steps longer than both baselines. The ConvLSTM has spatial bias too (convolutions), yet it fails just as fast as the Transformer. Spatial bias alone is not enough. Continuous diffusion with global reach is what matters.
 
 ---
 
@@ -51,41 +82,75 @@ The three components have non-overlapping roles:
 
 ```
 Input frame (3, 64, 64)
-        |
-  PatchEmbed (patch=4)
-        |
-  (128, 16, 16) latent grid
-        |
-  FluidWorldLayer2D x3          <-- spatial PDE
-  |  Multi-scale Laplacian           (adaptive step count)
-  |  Learned reaction terms
-  |  Bio mechanisms (Hebbian)
-        |
-  BeliefField                    <-- temporal dynamics
-  |  write(state, observation)       Gated state update
-  |  evolve(state, stimulus)         PDE + DeltaNet + Titans
-  |  read(state)                     Spatial/vector readout
-        |
-  PixelDecoder
-        |
-  Output frame (3, 64, 64)
+       |
+ PatchEmbed (stride 4)
+       |
+ (128, 16, 16) latent grid
+       |
+ FluidLayer2D x3               Reaction-diffusion PDE
+ |  Multi-scale Laplacian          dilations {1, 4, 16}
+ |  Learned reaction MLP           position-wise nonlinearity
+ |  Bio mechanisms                 Hebbian, lateral inhibition, fatigue
+       |
+ BeliefField                    Persistent temporal state
+ |  write(observation)             GRU-gated integration
+ |  evolve(state)                  PDE + DeltaNet + Titans
+ |  read(state)                    Spatial readout
+       |
+ PixelDecoder
+       |
+ Output frame (3, 64, 64)
 ```
 
-The `evolve()` step integrates the dual-ODE:
+One equation, two roles. The same reaction-diffusion PDE governs both spatial encoding (in the encoder layers) and temporal prediction (in the BeliefField). The core update:
 
 ```
-du/dt = Laplacian_diffusion(u)    -- spatial coherence (PDE)
-      + DeltaNet(u)               -- temporal error correction
-      + Reaction(u)               -- semantic nonlinearity
-      + alpha * Titans_memory     -- persistent scene context
-      + stimulus                  -- external action input
+u(t+1) = u(t) + dt * [D * laplacian(u) + Reaction(u) + Memory_terms]
 ```
+
+What falls out naturally: O(N) computation, adaptive early stopping, spatial coherence via continuous diffusion, and self-repair as a free byproduct of the Laplacian low-pass filter.
+
+The BeliefField adds biologically-inspired mechanisms: lateral inhibition (retinal processing), synaptic fatigue (prevents channel collapse), and Hebbian diffusion (co-activated pathways strengthen). The system operates at the edge of chaos (Lyapunov exponent 0.0033), bounded by RMSNorm homeostasis.
+
+---
+
+## The Fluid Architecture Lineage
+
+FluidWorld is the third iteration of a research program replacing attention with reaction-diffusion PDEs across modalities:
+
+- **FluidLM (2024)** : Language modeling with 1D Laplacian on token sequences
+- **FluidVLA (2025)** : Vision and robotic control with 2D Laplacian (40ms inference on RTX 4070). Extended to 3D for medical imaging (CT/MRI segmentation)
+- **FluidWorld (2026)** : World modeling. The PDE is now both encoder and temporal predictor
+
+Same core equation. Same O(N) complexity. Three modalities.
+
+---
+
+## Experiments
+
+15 numbered Jupyter notebooks, ordered for sequential execution. Training notebooks (01 to 03) need a GPU. Analysis notebooks (04 to 15) load saved checkpoints.
+
+| # | Notebook | What it does |
+|---|----------|-------------|
+| 01 | `01_train_moving_mnist` | Train pixel-prediction model (30 epochs) |
+| 02 | `02_train_jepa_mnist` | Train JEPA-style latent prediction (30 epochs) |
+| 03 | `03_train_edgefreq_fair` | Edge/Freq ablation from scratch (fair comparison) |
+| 04 | `04_test_symmetry_breaking` | Spontaneous pattern formation from uniform field |
+| 05 | `05_test_transition_phase` | Phase diagram: 225 (D, dt) configurations |
+| 06 | `06_test_resilience` | Perturbation recovery across corruption types |
+| 07 | `07_test_memory_titans` | Persistent memory: occlusion and recovery |
+| 08 | `08_test_energy_conservation` | Energy dynamics, RMSNorm, numerical stability |
+| 09 | `09_quantify_autopoiesis` | Autopoietic recovery (N=500, p < 10^-49) |
+| 10 | `10_perturbation_demo` | Visual: corrupt at step 5, watch self-repair |
+| 11 | `11_ablation_edgefreq` | Edge/Freq vs Laplacian-only (60 vs 30 epochs) |
+| 12 | `12_eval_edgefreq_fair` | Fair comparison: both 30 epochs. Edge/Freq collapses. |
+| 13 | `13_linear_probes` | Position, velocity, direction probes |
+| 14 | `14_quick_test` | Pixel vs JEPA vs Random: full comparison |
+| 15 | `15_demo_interactive_rollout` | Interactive rollout visualization |
 
 ---
 
 ## Quick Start
-
-### Install
 
 ```bash
 git clone https://github.com/infinition/FluidWorld.git
@@ -93,188 +158,43 @@ cd FluidWorld
 pip install -e .
 ```
 
-### Prepare data
+Open `experiments/01_train_moving_mnist.ipynb` and run all cells. About 3.5 hours on an RTX 4070 Ti for 30 epochs. Then run notebooks 04+ for analysis.
 
-Download [UCF-101](https://www.crcv.ucf.edu/data/UCF101.php) and preprocess:
+For UCF-101:
 
 ```bash
 python scripts/prepare_ucf101.py --source-dir path/to/UCF-101 --out-dir data/ucf101_64 --size 64 --max-frames 150
+
+python experiments/training/pixel_prediction/train_pixel.py \
+  --data-dir data/ucf101_64 --epochs 200 --batch-size 16 \
+  --bptt-steps 4 --max-steps 6 --lr 3e-4 \
+  --max-batches-per-epoch 2000 --no-fatigue \
+  --var-weight 0.1 --var-target 0.3
 ```
 
-### Train
-
-FluidWorld-Delta (PDE + DeltaNet + Titans):
-
-```bash
-python experiments/training/pixel_prediction/train_pixel.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000 --no-fatigue --var-weight 0.1 --var-target 0.3
-```
-
-Transformer baseline:
-
-```bash
-python experiments/training/baseline_comparison/train_transformer.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000
-```
-
-ConvLSTM baseline:
-
-```bash
-python experiments/training/baseline_comparison/train_convlstm.py --data-dir data/ucf101_64 --epochs 200 --batch-size 16 --bptt-steps 4 --max-steps 6 --lr 3e-4 --max-batches-per-epoch 2000
-```
-
-### Monitor
-
-```bash
-tensorboard --logdir runs/
-```
-
-To overlay all three runs:
-
-```bash
-tensorboard --logdir runs/phase1_pixel:PDE,runs/phase2_transformer:Transformer,runs/phase2_convlstm:ConvLSTM
-```
-
-### Visualize dense features (PCA)
-
-After training, visualize encoder feature quality:
-
-```bash
-python tools/visualize_pca_features.py --checkpoint checkpoints/phase1_pixel/model_step_8000.pt --data-dir data/ucf101_64 --n-samples 16
-```
-
-Output: `paper/figures/pca/pca_grid.png` (top row: original frames, bottom row: PCA of encoder features mapped to RGB).
-
-### Test
-
-```bash
-python -m pytest tests/ -v
-```
+Monitor with `tensorboard --logdir runs/`.
 
 ---
 
-## Repository Structure
+## Repository
 
-```
-FluidWorld/
-├── fluidworld/              Core package
-│   └── core/
-│       ├── world_model_v2.py          PDE world model
-│       ├── fluid_world_layer.py       Reaction-diffusion layer
-│       ├── belief_field.py            BeliefField (PDE + DeltaNet + Titans)
-│       ├── bio_mechanisms.py          Hebbian plasticity, lateral inhibition
-│       ├── transformer_world_model.py Transformer baseline
-│       ├── convlstm_world_model.py    ConvLSTM baseline
-│       ├── decoder.py                 Pixel decoder
-│       ├── video_dataset.py           Data loading
-│       └── ...
-├── experiments/
-│   ├── training/
-│   │   ├── pixel_prediction/    PDE world model on UCF-101
-│   │   ├── baseline_comparison/ Transformer + ConvLSTM (same params)
-│   │   ├── rollout_evaluation/  Multi-step autoregressive rollout
-│   │   ├── gradient_planning/   Action optimization through PDE
-│   │   └── ...
-│   └── analysis/
-│       ├── temporal_probe/      Velocity/direction encoding
-│       ├── surprise_signal/     Prediction error at events
-│       ├── hebbian_ablation/    Plasticity mechanism impact
-│       └── ...
-├── scripts/                 Data preparation
-├── tools/                   Visualization (PCA features, etc.)
-├── tests/                   Smoke tests
-└── paper/                   LaTeX source and figures
-```
-
-See [experiments/README.md](experiments/README.md) for detailed protocols and
-the full roadmap.
-
----
-
-## Experiment Pipeline
-
-The experiments follow a sequential pipeline. Each step builds on the previous one.
-
-```
-1. training/proprioception        MLP baseline on robot proprio (planned)
-       |
-2. training/pixel_prediction      PDE world model on UCF-101 video        [DONE]
-       |
-3. training/baseline_comparison   Transformer + ConvLSTM at same params   [DONE]
-       |
-4. training/representation_probing   Linear probe on frozen features
-       |
-5. training/rollout_evaluation       Multi-step autoregressive stability
-       |
-6. training/gradient_planning        Action optimization via backprop through PDE
-       |
-7. training/robot_deployment         Closed-loop control on SO-101 robot
-```
-
-Independent analysis experiments (can be run after step 2 with a trained checkpoint):
-
-```
-analysis/temporal_probe         Does the model encode velocity and direction?
-analysis/surprise_signal        Does prediction error spike at unexpected events?
-analysis/perturbation_analysis  Are causal effects spatially localized?
-analysis/multiscale_rollout     How does imagination quality degrade with horizon?
-analysis/hebbian_ablation       Impact of Hebbian plasticity on dynamics
-analysis/curriculum_training    Does structured training order help convergence?
-```
-
----
-
-## Changelog
-
-### v2 (FluidWorld-Delta) -- March 2026
-
-- **DeltaNet temporal correction** in BeliefField: content-based error-driven
-  state update using the delta rule (linear attention with error correction).
-  Replaces blind PDE-only temporal dynamics with learned correction.
-- **Titans persistent memory**: fast-weight associative memory that stores scene
-  structure and updates online at inference. Replaces MemoryPump.
-- **SynapticFatigue disabled by default**: was causing feature collapse
-  (Dead_Dims reaching 30K/32K). Use `--no-fatigue` flag.
-- **PCA feature visualization**: `tools/visualize_pca_features.py` for
-  V-JEPA-style dense feature quality inspection.
-- **Standalone**: all PDE modules (diffusion, FluidLayer2D, PatchEmbed) are now
-  bundled in `fluidworld/core/`. No external FluidVLA dependency required.
-- **Variance regularization**: `--var-weight` / `--var-target` flags to prevent
-  feature collapse without relying on SynapticFatigue.
-
-### v1 (PDE Only) -- February 2026
-
-- Initial release: reaction-diffusion PDE world model.
-- 3-way ablation (PDE vs Transformer vs ConvLSTM) at matched ~800K params.
-- Bio mechanisms: SynapticFatigue, LateralInhibition, HebbianDiffusion.
-- BeliefField with PDE-based temporal evolution.
-- Multi-step rollout evaluation up to h=5.
-
----
-
-## Generating Paper Figures
-
-Regenerate all figures from TensorBoard logs:
-
-```bash
-python paper/generate_figures.py
-```
-
-Output: `paper/figures/*.pdf` (used by `paper/fluidworld.tex`).
-
----
+- `fluidworld/core/` : model source code (PDE, BeliefField, baselines, decoder)
+- `experiments/` : 15 numbered notebooks + saved analysis data
+- `paper/` : LaTeX source, all figures, bibliography
 
 ## Citation
 
 ```bibtex
 @article{polly2026fluidworld,
-    title={FluidWorld: PDE-Based World Modeling via Reaction-Diffusion Dynamics},
+    title={FluidWorld: Reaction-Diffusion Dynamics as a Predictive Substrate for World Models},
     author={Polly, Fabien},
     year={2026},
     note={Preprint}
 }
 ```
 
----
-
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[CC-BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). Free for research. Attribution required. No commercial use without permission. Derivatives must share alike.
+
+See [LICENSE](LICENSE).

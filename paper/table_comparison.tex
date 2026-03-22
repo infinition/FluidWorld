@@ -1,0 +1,90 @@
+% Include this table with: \input{table_comparison}
+%
+% Training regime comparison table for FluidWorld on Moving MNIST.
+% Final results: Pixel (30ep), JEPA (30ep), Random baseline.
+
+\begin{table}[t]
+    \centering
+    \caption{\textbf{Training regime comparison on Moving MNIST.} Three training objectives applied to the same \fluidworld{} architecture ($\sim$801K parameters), evaluated after 30 epochs (Random baseline uses untrained weights). $^\dagger$The ``JEPA-style'' column refers to \fluidworld{} trained with a latent prediction objective inspired by LeCun's JEPA framework~\cite{lecun2022path}: the pixel decoder is removed from the loss and replaced by a target-encoder (EMA) + VICReg objective. This is \emph{not} Meta's I-JEPA or V-JEPA architecture. Latent cosine similarity is the primary discriminating metric: it measures whether the model's internal rollout tracks the true future state in representation space.}
+    \label{tab:training_regime_comparison}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Metric} & \textbf{Pixel (30 ep)} & \textbf{JEPA-style$^\dagger$ (30 ep)} & \textbf{Random} \\
+        \midrule
+        \multicolumn{4}{l}{\textit{Linear probes on frozen BeliefField features}} \\
+        \quad Position $R^2$ (spatial)$^a$    & 0.9766          & 0.9349          & \textbf{0.9665} \\
+        \quad Velocity $R^2$ (after PDE)$^b$  & \textbf{0.7738} & 0.2873          & 0.5459          \\
+        \quad Velocity $R^2$ (MLP probe)$^{b2}$ & 0.5600         & \textbf{0.6020} & 0.1990          \\
+        \quad Direction Acc.\ (8-class)$^c$   & \textbf{38.7\%} & 22.0\%          & 33.2\%          \\
+        \midrule
+        \multicolumn{4}{l}{\textit{Latent-space rollout quality (cosine similarity $\uparrow$)}$^d$} \\
+        \quad Step 1                          & 0.054           & \textbf{0.833}  & $-$0.020        \\
+        \quad Step 10                         & 0.143           & \textbf{0.827}  & 0.041           \\
+        \quad Step 19                         & $-$0.002        & \textbf{0.827}  & 0.009           \\
+        \bottomrule
+    \end{tabular}
+
+    \vspace{0.5em}
+    \footnotesize
+    $^a$ Position $R^2$ is non-discriminating: even random weights achieve 0.97, since spatial position is recoverable from any convolutional feature map via linear readout. \\
+    $^b$ The JEPA-style model's low \emph{linear} velocity $R^2$ reflects non-linear encoding of velocity in representation space, not failure. Cosine similarity of 0.827 at step~19 and the MLP probe result (footnote $b_2$) confirm this. \\
+    $^{b2}$ With a 2-layer MLP probe, the JEPA-style model's velocity $R^2$ rises from 0.287 to \textbf{0.602} ($\Delta = +0.31$), while Pixel drops from 0.774 to 0.560 ($\Delta = -0.21$) and Random drops from 0.546 to 0.199 ($\Delta = -0.35$). The JEPA-style model is the only one whose velocity $R^2$ increases under a non-linear probe, consistent with distributed, entangled representations as described by LeCun~(2022). Linear probes underestimate its encoding of dynamics. \\
+    $^c$ Chance level is 12.5\% for 8 direction classes. Pixel's advantage here reflects linearly decodable velocity, not superior dynamics modeling. \\
+    $^d$ Latent cosine similarity measures whether the model's autonomous rollout tracks the true future. The JEPA-style model maintains $\geq 0.827$ through step~19; Pixel and Random are near zero. It produces no pixel-space predictions because no decoder was trained (by design, it operates in representation space). \\
+    $^e$ Edge/Freq auxiliary losses (Sobel + FFT) were tested as an ablation. At 30 epochs, Edge/Freq degraded early-step SSIM from 0.778 to 0.013 relative to Laplacian-only. See ablation analysis for details.
+\end{table}
+
+\begin{table}[t]
+    \centering
+    \caption{\textbf{FluidWorld in the context of the JEPA research program.} LeCun's 2022 cognitive architecture blueprint\footnotemark[2] identified several open challenges. Meta FAIR's V-JEPA~2 tackles large-scale video understanding; \fluidworld{} explores complementary directions (rollout stability, self-repair, physics-grounded dynamics) at a much smaller scale. The two approaches are not in competition but address different parts of the same research agenda.}
+    \label{tab:fluidworld_vs_jepa}
+    \begin{tabular}{lp{4.8cm}p{4.8cm}}
+        \toprule
+        \textbf{Dimension} & \textbf{Meta FAIR (V-JEPA 2)\footnotemark[1]} & \textbf{FluidWorld} \\
+        \midrule
+        Model size
+            & $\sim$1.3B parameters
+            & $\sim$801K parameters \\
+        \addlinespace
+        Latent rollout stability (step 19)
+            & Error accumulation (acknowledged bottleneck)
+            & Cosine 0.827 (stable) \\
+        \addlinespace
+        Autopoietic self-repair
+            & Outside current scope
+            & Recovery 66.8\%, $p < 10^{-49}$ \\
+        \addlinespace
+        Perturbation robustness
+            & Outside current scope
+            & 50\% corruption recovered in 3--7 steps \\
+        \addlinespace
+        Physics-informed structure
+            & Data-driven (ViT)
+            & Reaction-diffusion PDE \\
+        \addlinespace
+        Persistent memory
+            & Fixed context window
+            & Titans + DeltaNet \\
+        \addlinespace
+        Persistent state (BeliefField)
+            & Proposed (LeCun 2022\footnotemark[2]), not implemented
+            & Implemented ($16 \times 16 \times 128$) \\
+        \addlinespace
+        Memory complexity
+            & $O(N^2)$
+            & $O(N)$ \\
+        \addlinespace
+        Training hardware
+            & 16+ A100 GPUs
+            & 1 RTX 4070 Ti \\
+        \addlinespace
+        Edge of chaos dynamics
+            & Outside current scope
+            & $\lambda = 0.0033$ (supercritical) \\
+        \bottomrule
+    \end{tabular}
+
+    \vspace{0.5em}
+    \footnotetext[1]{Bardes et al., ``V-JEPA 2: Self-Supervised Video Models Enable Understanding, Prediction, and Planning,'' arXiv:2506.09985, 2025.}
+    \footnotetext[2]{LeCun, ``A Path Towards Autonomous Machine Intelligence,'' OpenReview, 2022.}
+\end{table}

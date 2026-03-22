@@ -1,5 +1,5 @@
 """
-world_model_v2.py -- FluidWorld v2: pixel-prediction world model (replaces JEPA/VICReg approach).
+world_model_v2.py - FluidWorld v2: pixel-prediction world model (replaces JEPA/VICReg approach).
 """
 
 from typing import Dict, Optional, Sequence
@@ -521,6 +521,9 @@ class FluidWorldModelV2(nn.Module):
             # Images for TensorBoard (sigmoid + detach for [0, 1] pixels)
             "x_recon": torch.sigmoid(x_recon_logits).detach(),
             "x_pred": torch.sigmoid(x_pred_logits).detach(),
+            # Live (non-detached) pixel outputs for external loss computation
+            "x_recon_live": torch.sigmoid(x_recon_logits),
+            "x_pred_live": torch.sigmoid(x_pred_logits),
             # Bio mechanisms stats
             "bio_stats": bio_stats,
             # Anisotropic diffusion gate stats

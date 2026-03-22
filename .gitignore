@@ -8,13 +8,19 @@ dist/
 build/
 .pytest_cache/
 
-# Data (large files -- see scripts/prepare_ucf101.py to regenerate)
+# Data and checkpoints (large files)
 data/
 checkpoints/
 runs/
 
-# Internal docs (not for publication)
+# Notebook outputs and temp
+.ipynb_checkpoints/
+*.npz
+
+# Internal / archived
 _archive/
+temp/
+Context.txt
 
 # OS
 .DS_Store
