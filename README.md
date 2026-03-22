@@ -150,29 +150,11 @@ Same core equation. Same O(N) complexity. Three modalities.
 
 ---
 
-## Quick Start
+## Reproducing the Results
 
-```bash
-git clone https://github.com/infinition/FluidWorld.git
-cd FluidWorld
-pip install -e .
-```
+Clone the repository and run the numbered notebooks in `experiments/` sequentially. Training notebooks (01 to 03) require a GPU (tested on RTX 4070 Ti, ~3.5h for 30 epochs). Analysis notebooks (04 to 15) load saved checkpoints and run on CPU or GPU.
 
-Open `experiments/01_train_moving_mnist.ipynb` and run all cells. About 3.5 hours on an RTX 4070 Ti for 30 epochs. Then run notebooks 04+ for analysis.
-
-For UCF-101:
-
-```bash
-python scripts/prepare_ucf101.py --source-dir path/to/UCF-101 --out-dir data/ucf101_64 --size 64 --max-frames 150
-
-python experiments/training/pixel_prediction/train_pixel.py \
-  --data-dir data/ucf101_64 --epochs 200 --batch-size 16 \
-  --bptt-steps 4 --max-steps 6 --lr 3e-4 \
-  --max-batches-per-epoch 2000 --no-fatigue \
-  --var-weight 0.1 --var-target 0.3
-```
-
-Monitor with `tensorboard --logdir runs/`.
+Full setup instructions and dataset preparation are documented inside each notebook.
 
 ---
 

@@ -12,25 +12,25 @@
         \textbf{Metric} & \textbf{Pixel (30 ep)} & \textbf{JEPA-style$^\dagger$ (30 ep)} & \textbf{Random} \\
         \midrule
         \multicolumn{4}{l}{\textit{Linear probes on frozen BeliefField features}} \\
-        \quad Position $R^2$ (spatial)$^a$    & 0.9766          & 0.9349          & \textbf{0.9665} \\
-        \quad Velocity $R^2$ (after PDE)$^b$  & \textbf{0.7738} & 0.2873          & 0.5459          \\
-        \quad Velocity $R^2$ (MLP probe)$^{b2}$ & 0.5600         & \textbf{0.6020} & 0.1990          \\
-        \quad Direction Acc.\ (8-class)$^c$   & \textbf{38.7\%} & 22.0\%          & 33.2\%          \\
+        \quad Position $R^2$ (spatial)$^a$    & 0.9766          & 0.9349          & \textbf{0.9522} \\
+        \quad Velocity $R^2$ (after PDE)$^b$  & \textbf{0.7730} & 0.2876          & 0.5580          \\
+        \quad Velocity $R^2$ (MLP probe)$^{b2}$ & 0.6328         & \textbf{0.6028} & 0.3145          \\
+        \quad Direction Acc.\ (8-class)$^c$   & \textbf{38.4\%} & 22.1\%          & 30.8\%          \\
         \midrule
         \multicolumn{4}{l}{\textit{Latent-space rollout quality (cosine similarity $\uparrow$)}$^d$} \\
-        \quad Step 1                          & 0.054           & \textbf{0.833}  & $-$0.020        \\
-        \quad Step 10                         & 0.143           & \textbf{0.827}  & 0.041           \\
-        \quad Step 19                         & $-$0.002        & \textbf{0.827}  & 0.009           \\
+        \quad Step 1                          & 0.054           & \textbf{0.833}  & 0.060           \\
+        \quad Step 10                         & 0.143           & \textbf{0.827}  & 0.069           \\
+        \quad Step 19                         & $-$0.002        & \textbf{0.828}  & 0.047           \\
         \bottomrule
     \end{tabular}
 
     \vspace{0.5em}
     \footnotesize
     $^a$ Position $R^2$ is non-discriminating: even random weights achieve 0.97, since spatial position is recoverable from any convolutional feature map via linear readout. \\
-    $^b$ The JEPA-style model's low \emph{linear} velocity $R^2$ reflects non-linear encoding of velocity in representation space, not failure. Cosine similarity of 0.827 at step~19 and the MLP probe result (footnote $b_2$) confirm this. \\
-    $^{b2}$ With a 2-layer MLP probe, the JEPA-style model's velocity $R^2$ rises from 0.287 to \textbf{0.602} ($\Delta = +0.31$), while Pixel drops from 0.774 to 0.560 ($\Delta = -0.21$) and Random drops from 0.546 to 0.199 ($\Delta = -0.35$). The JEPA-style model is the only one whose velocity $R^2$ increases under a non-linear probe, consistent with distributed, entangled representations as described by LeCun~(2022). Linear probes underestimate its encoding of dynamics. \\
+    $^b$ The JEPA-style model's low \emph{linear} velocity $R^2$ reflects non-linear encoding of velocity in representation space, not failure. Cosine similarity of 0.828 at step~19 and the MLP probe result (footnote $b_2$) confirm this. \\
+    $^{b2}$ With a 2-layer MLP probe, the JEPA-style model's velocity $R^2$ rises from 0.288 to \textbf{0.603} ($\Delta = +0.315$), while Pixel drops from 0.773 to 0.633 ($\Delta = -0.14$) and Random drops from 0.558 to 0.315 ($\Delta = -0.24$). The JEPA-style model is the only one whose velocity $R^2$ increases under a non-linear probe, consistent with distributed, non-linearly entangled representations. Linear probes underestimate its encoding of dynamics. \\
     $^c$ Chance level is 12.5\% for 8 direction classes. Pixel's advantage here reflects linearly decodable velocity, not superior dynamics modeling. \\
-    $^d$ Latent cosine similarity measures whether the model's autonomous rollout tracks the true future. The JEPA-style model maintains $\geq 0.827$ through step~19; Pixel and Random are near zero. It produces no pixel-space predictions because no decoder was trained (by design, it operates in representation space). \\
+    $^d$ Latent cosine similarity measures whether the model's autonomous rollout tracks the true future. The JEPA-style model maintains $\geq 0.827$ through step~19; Pixel is near zero and Random fluctuates around chance. It produces no pixel-space predictions because no decoder was trained (by design, it operates in representation space). \\
     $^e$ Edge/Freq auxiliary losses (Sobel + FFT) were tested as an ablation. At 30 epochs, Edge/Freq degraded early-step SSIM from 0.778 to 0.013 relative to Laplacian-only. See ablation analysis for details.
 \end{table}
 
