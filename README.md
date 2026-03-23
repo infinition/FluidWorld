@@ -1,3 +1,4 @@
+<img width="1048" height="823" alt="image" src="https://github.com/user-attachments/assets/bc9e974e-66fc-43ac-9a0b-8b06cea685cd" />
 
 
 # FluidWorld
@@ -12,6 +13,7 @@ Trained with a latent prediction objective, the PDE substrate maintains cosine s
 
 > **Paper:** [Reaction-Diffusion Dynamics as a Predictive Substrate for World Models](paper/fluidworld.tex)
 
+Submitted on arXiv : https://github.com/infinition/FluidWorld/blob/main/paper/FluidWorld.pdf
 ---
 
 ## Why This Matters
