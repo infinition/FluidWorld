@@ -11,9 +11,8 @@ Trained with a latent prediction objective, the PDE substrate maintains cosine s
 
 800K parameters. One consumer GPU. Results that challenge the assumption that attention is necessary for world modeling.
 
-> **Paper:** [Reaction-Diffusion Dynamics as a Predictive Substrate for World Models](paper/fluidworld.tex)
+> **Paper:** [Reaction-Diffusion Dynamics as a Predictive Substrate for World Models](https://arxiv.org/abs/2603.21315)
 
-Submitted on arXiv : https://github.com/infinition/FluidWorld/blob/main/paper/FluidWorld.pdf
 ---
 
 ## Why This Matters
